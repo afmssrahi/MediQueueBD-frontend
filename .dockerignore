@@ -1,0 +1,35 @@
+# Dependencies and build output — reinstalled/rebuilt inside the image
+node_modules
+.next
+out
+build
+dist
+
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+
+# VCS and editor noise
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Logs and coverage
+*.log
+build.log
+build-docker.log
+coverage
+.playwright
+
+# Docs and agent metadata that the build does not need
+AGENTS.md
+README.md
+DOCKER.md
+docs
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,5 +1,16 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Run it with Docker
+
+The fastest way to run this app — no Node.js install needed on your machine:
+
+```bash
+docker compose up --build
+```
+
+Then open <http://localhost:3000>. Full instructions, configuration and
+troubleshooting are in **[DOCKER.md](./DOCKER.md)**.
+
 ## Getting Started
 
 First, run the development server:

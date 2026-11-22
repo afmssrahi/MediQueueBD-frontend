@@ -1,0 +1,35 @@
+# MediQueue BD — frontend, runnable with `docker compose up`
+#
+# The image is built from ./Dockerfile. Everything the app needs is baked in,
+# so a fresh clone only needs Docker — no Node.js install on the host.
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are inlined into the browser bundle at build
+        # time. Change them here (or in .env) and rebuild to change behaviour.
+        NEXT_PUBLIC_API_MODE: ${NEXT_PUBLIC_API_MODE:-mock}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api}
+    image: mediqueue-frontend:latest
+    container_name: mediqueue-frontend
+    ports:
+      # host:container — edit the left side to use a different host port
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
