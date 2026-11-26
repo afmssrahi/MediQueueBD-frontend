@@ -1,8 +1,9 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MediQueue BD — frontend
+
+The Next.js 16 app for MediQueue BD: six role dashboards, the live queue
+board, the medical record, and the AI summary screen.
 
 ## Run it with Docker
-
-The fastest way to run this app — no Node.js install needed on your machine:
 
 ```bash
 docker compose up --build
@@ -11,37 +12,54 @@ docker compose up --build
 Then open <http://localhost:3000>. Full instructions, configuration and
 troubleshooting are in **[DOCKER.md](./DOCKER.md)**.
 
-## Getting Started
+This starts the frontend **and** the AI summary service, so the AI summary
+screen works out of the box. For the whole stack — including the optional
+MySQL service — use the compose file in the parent folder.
 
-First, run the development server:
+## Getting started (development)
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) and sign in with one of the
+demo accounts on the login screen.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The app runs on a bundled demo database by default, so it works with no
+backend. To point it at the AI summary service, set these in `frontend/.env`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+NEXT_PUBLIC_API_MODE=live
+AI_SERVICE_URL=http://localhost:4100/api
+```
 
-## Learn More
+`AI_SERVICE_URL` is read on the server side, so it is never exposed to the
+browser — the browser calls `/ai-service/**` on this app's own origin and
+Next.js proxies it to the service.
 
-To learn more about Next.js, take a look at the following resources:
+## The checks
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run typecheck   # types
+npm run lint        # lint
+npm run test        # unit tests
+npm run build       # production build
+npm run verify      # all four
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## How it is put together
 
-## Deploy on Vercel
+| Folder | What it holds |
+|---|---|
+| `src/app/` | The routes — one folder per route group, one per role. |
+| `src/api/` | The route table (the backend contract), the transport and the envelope. |
+| `src/domain/` | Pure TypeScript: the queue, waiting-time, appointment and EMR engines. No React, no DOM. |
+| `src/features/` | One slice per feature — components, hooks, services, schemas. |
+| `src/demo/` | The seeded demo database and its fixtures. |
+| `src/i18n/` | Every user-facing string, in English and Bangla. |
+| `src/proxy.ts` | Proxies `/ai-service/**` to the AI summary service. |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The layering rule is simple: `src/domain/**` and `src/demo/**` never import
+React and never touch the DOM, so they lift unchanged into a real backend
+later.

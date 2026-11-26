@@ -364,12 +364,19 @@ export interface AppNotification {
   href?: string | null;
 }
 
+/**
+ * A generated case summary.
+ *
+ * `simulated` is `true` for the demo summaries the mock transport produces,
+ * and `false` for the ones the real AI summary service returns. The field was
+ * widened from the literal `true` so a real provider can be represented.
+ */
 export interface AiCaseSummary {
   id: string;
   patientId: string;
   generatedAt: string;
-  /** Always true in this prototype — the summary is simulated. */
-  simulated: true;
+  /** True when the summary came from the demo script rather than the service. */
+  simulated: boolean;
   headline: string;
   summary: string;
   keyFindings: string[];
@@ -379,6 +386,269 @@ export interface AiCaseSummary {
   recommendations: string[];
   reviewed: boolean;
   editedSummary: string | null;
+}
+
+/** One uploaded prescription or medical record. */
+export interface AiDocument {
+  id: string;
+  patientId: string;
+  filename: string;
+  mime: string;
+  bytes: number;
+  sha256: string;
+  note: string | null;
+  /** "upload" for a file the patient sent, "import" for one pulled from the EMR. */
+  source: string;
+  /** The id this document has in the main MediQueue system. */
+  externalId: string | null;
+  uploadedAt: string;
+  fileUrl: string;
+}
+
+/** A published paper the summary leans on. */
+export interface AiCitation {
+  id: string;
+  summaryId: string;
+  pmid: string | null;
+  doi: string | null;
+  pmcid: string | null;
+  title: string;
+  authors: string | null;
+  journal: string | null;
+  year: number | null;
+  url: string | null;
+  isOpenAccess: boolean;
+  citedBy: number | null;
+  why: string | null;
+}
+
+/** The vitals a document recorded. */
+export interface AiVitals {
+  bloodPressure?: string | null;
+  temperature?: string | null;
+  pulse?: string | null;
+  heartRate?: string | null;
+  weight?: string | null;
+  spo2?: string | null;
+  oxygenSaturation?: string | null;
+}
+
+/** One entry in the patient's running timeline. */
+export interface AiTimelineEntry {
+  summaryId: string;
+  documentId: string;
+  filename: string;
+  uploadedAt: string;
+  headline: string;
+  summary: string;
+  originalSummary: string;
+  keyFindings: string[];
+  medications: string[];
+  allergies: string[];
+  conditions: string[];
+  recommendations: string[];
+  vitals: AiVitals;
+  advice: string | null;
+  followUp: string | null;
+  provider: string | null;
+  model: string | null;
+  confidence: number | null;
+  needsReview: boolean;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  citations: AiCitation[];
+}
+
+/** The cumulative history — the side note on the patient's profile. */
+export interface AiHistory {
+  headline: string;
+  summary: string;
+  timeline: AiTimelineEntry[];
+  generatedAt?: string;
+}
+
+/** The structured clinical data the AI read out of one document. */
+export interface AiStructuredData {
+  diagnoses: { name: string; term: string; code?: string }[];
+  medicines: {
+    name: string;
+    dose: string;
+    frequency: string;
+    duration: string;
+    instructions: string | null;
+  }[];
+  allergies: string[];
+  vitals: AiVitals;
+  advice: string | null;
+  followUpDate: string | null;
+  doctorName: string | null;
+  notes: string[];
+}
+
+/** One document, with the summary the service built from it. */
+export interface AiDocumentDetail {
+  document: AiDocument;
+  summary: AiCaseSummary | null;
+  citations: AiCitation[];
+  extraction: {
+    id: string;
+    provider: string;
+    model: string | null;
+    status: string;
+    error: string | null;
+    confidence: number | null;
+    duration_ms: number | null;
+    created_at: string;
+  } | null;
+}
+
+/** The result of uploading one or more documents. */
+export interface AiUploadResult {
+  uploaded: { document: AiDocument; duplicate: boolean }[];
+  results: {
+    document: AiDocument;
+    summary: AiCaseSummary | null;
+    citations: AiCitation[];
+    error?: string;
+  }[];
+  history: AiHistory;
+}
+
+/** The payload that folds the AI findings into the medical record. */
+export interface AiEmrExport {
+  target: string;
+  patientId: string;
+  externalPatientId: string | null;
+  summaryId: string;
+  documentId: string;
+  generatedAt: string;
+  summary: {
+    headline: string;
+    text: string;
+    keyFindings: string[];
+    recommendations: string[];
+    advice: string | null;
+    followUp: string | null;
+    needsReview: boolean;
+    reviewedBy: string | null;
+    reviewedAt: string | null;
+    provider: string | null;
+    model: string | null;
+    confidence: number | null;
+  };
+  conditions: {
+    name: string;
+    code: string | null;
+    status: string;
+    diagnosedAt: string;
+    notes: string;
+  }[];
+  allergies: {
+    substance: string;
+    reaction: string;
+    severity: string;
+    recordedAt: string;
+    recordedBy: string;
+  }[];
+  prescriptions: {
+    date: string;
+    doctorName: string | null;
+    advice: string;
+    notes: string;
+    items: {
+      medicine: string;
+      dose: string;
+      frequency: string;
+      duration: string;
+      instructions: string | null;
+    }[];
+  }[];
+  records: {
+    date: string;
+    visitType: string;
+    chiefComplaint: string;
+    diagnosis: string;
+    notes: string;
+    vitals: {
+      bloodPressure: string | null;
+      temperature: string | null;
+      pulse: string | null;
+      weight: string | null;
+      spo2: string | null;
+    };
+    documentName: string | null;
+    documentSize: number | null;
+  }[];
+}
+
+/** The merged export for a whole patient. */
+export interface AiEmrExportBundle {
+  status: string;
+  exported: number;
+  payload: {
+    target: string;
+    patientId: string;
+    externalPatientId: string | null;
+    conditions: AiEmrExport["conditions"];
+    allergies: AiEmrExport["allergies"];
+    prescriptions: AiEmrExport["prescriptions"];
+    records: AiEmrExport["records"];
+    summary: AiEmrExport["summary"] | null;
+  };
+  /** The outcome of the server-to-server delivery, when there was one. */
+  push?: {
+    status: "pushed" | "failed" | "skipped";
+    detail: string;
+    result: unknown;
+  };
+}
+
+/** What the main API files when the AI payload is synced into the record. */
+export interface EmrSyncResult {
+  patientId: string;
+  /** How many rows were added — the rest were already on file. */
+  created: {
+    conditions: number;
+    allergies: number;
+    prescriptions: number;
+    records: number;
+  };
+  /** How many were already on file and were left alone. */
+  skipped: {
+    conditions: number;
+    allergies: number;
+    prescriptions: number;
+    records: number;
+  };
+  /** The summary that was filed on the profile. */
+  summary: {
+    headline: string;
+    text: string;
+    needsReview: boolean;
+    provider: string | null;
+    model: string | null;
+    confidence: number | null;
+  } | null;
+  message: string;
+}
+
+/** What the service reports about itself. */
+export interface AiServiceHealth {
+  status: string;
+  service: string;
+  database: "sqlite" | "mysql";
+  provider: {
+    active: string;
+    model: string;
+    mode: string;
+    note: string;
+  };
+  literature: { enabled: boolean; sources: string[] };
+  limits: {
+    maxUploadBytes: number;
+    maxDocumentsPerPatient: number;
+    extractConcurrency: number;
+  };
 }
 
 export interface QueueSnapshot {

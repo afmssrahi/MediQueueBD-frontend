@@ -216,6 +216,68 @@ export const emrHandlers: HandlerMap = {
     });
   },
 
+  "POST /prescriptions": (request) => {
+    const body = bodyOf(request);
+    const db = readDb();
+
+    const patientId = String(body.patientId ?? "");
+    const items = Array.isArray(body.items) ? body.items : [];
+
+    const fields: Record<string, string> = {};
+    if (!patientId) fields.patientId = "Choose a patient";
+    if (items.length === 0) fields.items = "Add at least one medicine";
+    if (Object.keys(fields).length > 0) {
+      return fail(
+        "VALIDATION_ERROR",
+        "Please correct the highlighted fields.",
+        400,
+        fields,
+      );
+    }
+
+    if (!db.users.some((item) => item.id === patientId)) {
+      return fail("NOT_FOUND", "No such patient.", 404);
+    }
+
+    const doctorId = String(body.doctorId ?? "");
+    const doctor =
+      db.doctors.find((item) => item.id === doctorId) ?? null;
+
+    const created: Prescription = {
+      id: `PR${db.counters.prescription + 1}`,
+      patientId,
+      appointmentId: null,
+      doctorId: doctor?.id ?? "",
+      doctorName: String(body.doctorName ?? doctor?.name ?? "AI summary service"),
+      date: String(body.date ?? todayIso()),
+      items: items.map((item, index) => {
+        const entry = item as Record<string, unknown>;
+        return {
+          id: `I${index + 1}`,
+          medicine: String(entry.medicine ?? ""),
+          dose: String(entry.dose ?? ""),
+          frequency: String(entry.frequency ?? ""),
+          duration: String(entry.duration ?? ""),
+          instructions:
+            typeof entry.instructions === "string" ? entry.instructions : null,
+        };
+      }),
+      advice: String(body.advice ?? ""),
+      notes: typeof body.notes === "string" ? body.notes : null,
+    };
+
+    writeDb((current) => ({
+      ...current,
+      prescriptions: [...current.prescriptions, created],
+      counters: {
+        ...current.counters,
+        prescription: current.counters.prescription + 1,
+      },
+    }));
+
+    return ok(created);
+  },
+
   "GET /allergies": (request) => {
     const query = queryOf(request);
     const db = readDb();

@@ -63,11 +63,19 @@ export const API_ROUTES = {
   updateRecord: { method: "PATCH", path: "/records/:id" },
   deleteRecord: { method: "DELETE", path: "/records/:id" },
   listPrescriptions: { method: "GET", path: "/prescriptions" },
+  createPrescription: { method: "POST", path: "/prescriptions" },
   listAllergies: { method: "GET", path: "/allergies" },
   createAllergy: { method: "POST", path: "/allergies" },
   deleteAllergy: { method: "DELETE", path: "/allergies/:id" },
   listConditions: { method: "GET", path: "/conditions" },
   createCondition: { method: "POST", path: "/conditions" },
+  /**
+   * File the AI summary payload into the medical record.
+   *
+   * The AI summary service produces this payload; the main system decides
+   * what to file. See `docs/integration.md`.
+   */
+  syncEmr: { method: "POST", path: "/emr/sync" },
 
   // ── Diagnostics ─────────────────────────────────────────────────────────
   listCenters: { method: "GET", path: "/diagnostic-centers" },
@@ -82,6 +90,38 @@ export const API_ROUTES = {
   getSummary: { method: "GET", path: "/ai-summaries/:id" },
   generateSummary: { method: "POST", path: "/ai-summaries/generate" },
   updateSummary: { method: "PATCH", path: "/ai-summaries/:id" },
+
+  // ── AI summary service (the standalone backend) ─────────────────────────
+  /**
+   * Create-or-match the patient in the AI summary service.
+   *
+   * The service knows the patient by its own id, but it links to the main
+   * system through `externalId` — the id the patient has here. The endpoint
+   * is create-or-match, so calling it twice is safe.
+   */
+  aiCreatePatient: { method: "POST", path: "/ai-service/patients" },
+  /** The cumulative patient history — the side note on the profile. */
+  aiPatientSummary: { method: "GET", path: "/ai-service/patients/:id/summary" },
+  /** The chronological roll-up across every upload. */
+  aiPatientTimeline: { method: "GET", path: "/ai-service/patients/:id/timeline" },
+  /** The documents a patient has uploaded. */
+  aiPatientDocuments: { method: "GET", path: "/ai-service/patients/:id/documents" },
+  /** Upload a prescription or medical record. */
+  aiUploadDocument: { method: "POST", path: "/ai-service/patients/:id/documents" },
+  /** Every literature reference the patient's summaries cite. */
+  aiPatientCitations: { method: "GET", path: "/ai-service/patients/:id/citations" },
+  /** The payload that folds the AI findings into the medical record. */
+  aiPatientExport: { method: "GET", path: "/ai-service/patients/:id/export" },
+  /** Push the payload out and record the export. */
+  aiPatientSync: { method: "POST", path: "/ai-service/patients/:id/sync" },
+  /** One document, with its summary and its citations. */
+  aiDocument: { method: "GET", path: "/ai-service/documents/:id" },
+  /** Sign off or edit one summary. */
+  aiReviewSummary: { method: "POST", path: "/ai-service/summaries/:id/review" },
+  /** The literature behind one summary. */
+  aiSummaryCitations: { method: "GET", path: "/ai-service/summaries/:id/citations" },
+  /** Is the service alive, and which extractor is it using? */
+  aiServiceHealth: { method: "GET", path: "/ai-service/health" },
 
   // ── Notifications ───────────────────────────────────────────────────────
   listNotifications: { method: "GET", path: "/notifications" },

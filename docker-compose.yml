@@ -2,6 +2,15 @@
 #
 # The image is built from ./Dockerfile. Everything the app needs is baked in,
 # so a fresh clone only needs Docker — no Node.js install on the host.
+#
+# This file runs the **frontend together with the AI summary service**. The AI
+# service is a separate backend, so it is started here as well — without it the
+# app still runs, but the /patient/summary screen falls back to the bundled
+# demo data.
+#
+# For the whole stack (frontend + AI summary service + optional MySQL), use the
+# compose file in the parent folder instead: `docker compose up --build` from
+# the repository root.
 
 services:
   frontend:
@@ -22,6 +31,12 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # Server-side only — never exposed to the browser. Read per request by
+      # src/proxy.ts, so it can be changed without rebuilding the image.
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-summary:4100/api}
+    depends_on:
+      ai-summary:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test:
@@ -33,3 +48,42 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ── the AI summary service ─────────────────────────────────────────────────
+  # It turns an uploaded prescription or medical record into a summary, a
+  # patient history and a list of real literature references.
+  ai-summary:
+    build:
+      context: ../ai-summary-prototype
+      dockerfile: Dockerfile
+    image: mediqueue-ai-summary:latest
+    container_name: mediqueue-ai-summary
+    ports:
+      - "${AI_PORT:-4100}:4100"
+    environment:
+      PORT: 4100
+      HOST: 0.0.0.0
+      DATA_DIR: /data
+      # With no key the offline heuristic extractor runs, so the service always
+      # starts. A key only changes how well photographed documents are read.
+      AI_PROVIDER: ${AI_PROVIDER:-auto}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LITERATURE_ENABLED: ${LITERATURE_ENABLED:-true}
+      LITERATURE_EMAIL: ${LITERATURE_EMAIL:-}
+      DB_DRIVER: ${DB_DRIVER:-sqlite}
+    volumes:
+      - ai-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ai-data:

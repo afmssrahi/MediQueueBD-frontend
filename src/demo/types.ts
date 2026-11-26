@@ -49,6 +49,7 @@ export interface DemoDatabase {
   counters: {
     appointment: number;
     record: number;
+    prescription: number;
     report: number;
     notification: number;
     summary: number;

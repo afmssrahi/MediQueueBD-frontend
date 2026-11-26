@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { readDb, resetDb } from "@/demo/db";
 import { mockTransport } from "@/api/mock-handlers";
 import type { TransportRequest } from "@/api/transport";
+import { addDaysIso, todayIso, weekdayOf } from "@/lib/format";
 import type { Appointment, Slot } from "@/types";
 
 /**
@@ -39,20 +40,25 @@ async function call<T>(
   return response.data;
 }
 
-/** The first bookable date in the seeded schedule. */
-function firstBookableDate(): string {
+/**
+ * The first bookable date for the given doctor.
+ *
+ * The date is built from the local calendar day and the weekday is read back
+ * from the ISO string, so the two always agree. Deriving the weekday from a
+ * `Date` and the date from `toISOString()` mixes the local and the UTC
+ * calendar, which disagrees for any time between midnight and 06:00 in
+ * Bangladesh — and the seeded clinics do not run on every weekday.
+ */
+function firstBookableDate(doctorId: string): string {
   const db = readDb();
-  const doctor = db.doctors.find((item) => item.availableWeekdays.length > 0);
+  const doctor = db.doctors.find((item) => item.id === doctorId);
   if (!doctor) throw new Error("The seed has no doctor with clinic days.");
 
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
+  const tomorrow = addDaysIso(todayIso(), 1);
 
   for (let offset = 0; offset < 14; offset += 1) {
-    const candidate = new Date(date);
-    candidate.setDate(candidate.getDate() + offset);
-    const iso = candidate.toISOString().slice(0, 10);
-    if (doctor.availableWeekdays.includes(candidate.getDay())) return iso;
+    const iso = addDaysIso(tomorrow, offset);
+    if (doctor.availableWeekdays.includes(weekdayOf(iso))) return iso;
   }
 
   throw new Error("The seed has no bookable date in the next two weeks.");
@@ -68,7 +74,7 @@ describe("the appointment booking lifecycle", () => {
       query: { active: "true" },
     });
     const doctorId = doctors[0].id;
-    const date = firstBookableDate();
+    const date = firstBookableDate(doctorId);
 
     const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
       query: { doctorId, date },
@@ -100,7 +106,7 @@ describe("the appointment booking lifecycle", () => {
       query: { active: "true" },
     });
     const doctorId = doctors[0].id;
-    const date = firstBookableDate();
+    const date = firstBookableDate(doctorId);
 
     const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
       query: { doctorId, date },
@@ -131,7 +137,7 @@ describe("the appointment booking lifecycle", () => {
       query: { active: "true" },
     });
     const doctorId = doctors[0].id;
-    const date = firstBookableDate();
+    const date = firstBookableDate(doctorId);
 
     const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
       query: { doctorId, date },
@@ -169,7 +175,7 @@ describe("the appointment booking lifecycle", () => {
       query: { active: "true" },
     });
     const doctorId = doctors[0].id;
-    const date = firstBookableDate();
+    const date = firstBookableDate(doctorId);
 
     const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
       query: { doctorId, date },
@@ -219,7 +225,7 @@ describe("the appointment booking lifecycle", () => {
       query: { active: "true" },
     });
     const doctorId = doctors[0].id;
-    const date = firstBookableDate();
+    const date = firstBookableDate(doctorId);
 
     const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
       query: { doctorId, date },
@@ -269,7 +275,7 @@ describe("the appointment booking lifecycle", () => {
       query: { active: "true" },
     });
     const doctorId = doctors[0].id;
-    const date = firstBookableDate();
+    const date = firstBookableDate(doctorId);
 
     const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
       query: { doctorId, date },

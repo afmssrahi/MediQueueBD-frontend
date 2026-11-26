@@ -4,9 +4,14 @@ Everything the app needs is baked into the image, so a fresh clone only requires
 **Docker** — no Node.js install on the host.
 
 - `Dockerfile` — multi-stage build (deps → build → runtime)
-- `docker-compose.yml` — one-command run
+- `docker-compose.yml` — one-command run (the frontend + the AI summary service)
+- `src/proxy.ts` — proxies `/ai-service/**` to the AI summary service
 - `.dockerignore` — keeps the build context small
 - `.env.example` — optional configuration
+
+> **Running the whole stack?** Use the compose file in the parent folder
+> instead — it also brings up MySQL as an option:
+> `docker compose up --build` from the repository root.
 
 ---
 
@@ -35,6 +40,10 @@ docker compose up --build
 
 Then open <http://localhost:3000>.
 
+This starts **two** containers: the frontend on port 3000 and the AI summary
+service on port 4100. The frontend proxies `/ai-service/**` to the service, so
+the AI summary screen works out of the box.
+
 The first build takes a few minutes (it installs the full dependency tree and
 runs `next build`). Later builds reuse the Docker layer cache and finish in
 seconds.
@@ -48,7 +57,7 @@ docker compose up -d --build
 Stop it with `Ctrl+C`, or in the background:
 
 ```bash
-docker compose down          # stop and remove the container
+docker compose down          # stop and remove the containers
 docker compose down --volumes  # also remove cached volumes
 ```
 
@@ -104,7 +113,9 @@ cp .env.example .env      # Windows PowerShell: Copy-Item .env.example .env
 | --- | --- | --- |
 | `NEXT_PUBLIC_API_MODE` | `mock` | `mock` = bundled demo data (no backend needed). `live` = call a real backend. |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:4000/api` | Backend base URL. Only used in `live` mode. |
+| `AI_SERVICE_URL` | `http://ai-summary:4100/api` | The AI summary service. Server-side only — never exposed to the browser. |
 | `PORT` | `3000` | Host port the app is published on. |
+| `AI_PORT` | `4100` | Host port the AI summary service is published on. |
 
 > **`NEXT_PUBLIC_*` variables are inlined into the browser bundle at build
 > time.** Changing one requires a rebuild: `docker compose up --build`.
@@ -152,6 +163,16 @@ Change the host port in `.env` (`PORT=3001`) or pass a different mapping:
 **The page loads but shows no data**
 The app runs on demo data by default. Confirm `NEXT_PUBLIC_API_MODE=mock` and
 rebuild.
+
+**The AI summary screen says the service is unreachable**
+The AI summary service is a separate container. Check it is running:
+
+```bash
+docker compose ps
+curl http://localhost:4100/api/health
+```
+
+If it is not up: `docker compose up -d ai-summary`.
 
 **Changes to the code are not showing**
 Rebuild the image — the container uses the built output, not your local files:

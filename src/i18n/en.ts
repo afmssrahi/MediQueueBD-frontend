@@ -573,6 +573,48 @@ export const en = {
     notReviewed: "Not reviewed",
     disclaimer:
       "Never present this output as a diagnosis. It exists to demonstrate the interface, not to inform care.",
+
+    // ── the AI summary service screen ──────────────────────────────────────
+    serviceOffline: "The AI summary service is not reachable",
+    serviceOfflineHint:
+      "Start the service with `npm start` in ai-summary-prototype/, then reload this page.",
+    extractor: "Extractor",
+    demoMode: "Demo mode",
+    references: "References from",
+    uploadTitle: "Upload a prescription or medical record",
+    uploadLabel: "Document",
+    uploadHint:
+      "PNG, JPEG, WebP or PDF · up to 5 MB · select several files at once. Each upload is added to your history.",
+    noteLabel: "Note",
+    notePlaceholder: "e.g. cardiology follow-up",
+    uploadButton: "Upload and summarise",
+    uploading: "Reading the document…",
+    uploadDone: "Your document has been summarised.",
+    historyTitle: "Your history",
+    historyError: "We could not load your history",
+    loading: "Loading…",
+    entryCount: "{count} entries on record",
+    pendingReview: "{count} awaiting review",
+    timelineTab: "Timeline",
+    citationsTab: "References",
+    syncTab: "Medical record",
+    noTimeline: "No documents yet",
+    noTimelineHint:
+      "Upload a prescription or a medical record and it will be summarised here.",
+    noCitations: "No references yet",
+    noCitationsHint:
+      "References appear once a document names a condition that has published guidance.",
+    needsReview: "Needs review",
+    openAccess: "Open access",
+    referenceCount: "{count} references",
+    syncTitle: "Add to your medical record",
+    syncHint:
+      "This is the structured data the service read out of your documents, in the shape the medical record uses. A clinician confirms it before it is filed.",
+    syncButton: "Send to the medical record",
+    syncing: "Sending…",
+    syncDone: "{count} item(s) were added to the medical record.",
+    prescriptions: "Prescriptions",
+    records: "Records",
   },
 
   notifications: {

@@ -50,6 +50,7 @@ export function createSeedDatabase(): DemoDatabase {
     counters: {
       appointment: 2000,
       record: 1000,
+      prescription: 1000,
       report: 2000,
       notification: 100,
       summary: 100,

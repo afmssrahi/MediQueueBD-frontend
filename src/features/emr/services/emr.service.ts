@@ -3,6 +3,7 @@ import { request } from "@/services/request";
 import type {
   Allergy,
   Condition,
+  EmrSyncResult,
   MedicalRecord,
   Prescription,
 } from "@/types";
@@ -35,12 +36,118 @@ export interface SaveRecordRequest {
   documentSize?: number | null;
 }
 
+export interface SavePrescriptionRequest {
+  patientId: string;
+  doctorId?: string;
+  doctorName?: string;
+  date?: string;
+  advice?: string;
+  notes?: string | null;
+  items: {
+    medicine: string;
+    dose: string;
+    frequency: string;
+    duration: string;
+    instructions?: string | null;
+  }[];
+}
+
+/**
+ * The payload the AI summary service produces.
+ *
+ * It is the MediQueue EMR shape — the conditions, allergies, prescriptions
+ * and records the service read out of a patient's uploaded documents.
+ */
+export interface EmrSyncPayload {
+  target: string;
+  patientId: string;
+  externalPatientId: string | null;
+  conditions: {
+    name: string;
+    code: string | null;
+    status: string;
+    diagnosedAt: string;
+    notes: string;
+  }[];
+  allergies: {
+    substance: string;
+    reaction: string;
+    severity: string;
+    recordedAt: string;
+    recordedBy: string;
+  }[];
+  prescriptions: {
+    date: string;
+    doctorName: string | null;
+    advice: string;
+    notes: string;
+    items: {
+      medicine: string;
+      dose: string;
+      frequency: string;
+      duration: string;
+      instructions: string | null;
+    }[];
+  }[];
+  records: {
+    date: string;
+    visitType: string;
+    chiefComplaint: string;
+    diagnosis: string;
+    notes: string;
+    vitals: {
+      bloodPressure: string | null;
+      temperature: string | null;
+      pulse: string | null;
+      weight: string | null;
+      spo2: string | null;
+    };
+    documentName: string | null;
+    documentSize: number | null;
+  }[];
+  summary: {
+    headline: string;
+    text: string;
+    needsReview: boolean;
+    provider: string | null;
+    model: string | null;
+    confidence: number | null;
+  } | null;
+}
+
 export const emrService = {
   async listRecords(filters: RecordFilters = {}): Promise<MedicalRecord[]> {
     const { data } = await request<MedicalRecord[]>({
       method: API_ROUTES.listRecords.method,
       path: API_ROUTES.listRecords.path,
       query: { ...filters },
+    });
+    return data;
+  },
+
+  /** File a prescription. */
+  async createPrescription(
+    payload: SavePrescriptionRequest,
+  ): Promise<Prescription> {
+    const { data } = await request<Prescription>({
+      method: API_ROUTES.createPrescription.method,
+      path: API_ROUTES.createPrescription.path,
+      body: payload,
+    });
+    return data;
+  },
+
+  /**
+   * File the AI summary payload into the medical record.
+   *
+   * The endpoint is idempotent, so calling it twice with the same payload
+   * does not double the record.
+   */
+  async sync(payload: EmrSyncPayload): Promise<EmrSyncResult> {
+    const { data } = await request<EmrSyncResult>({
+      method: API_ROUTES.syncEmr.method,
+      path: API_ROUTES.syncEmr.path,
+      body: payload,
     });
     return data;
   },

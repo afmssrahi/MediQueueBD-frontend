@@ -13,6 +13,8 @@ import {
   emrHandlers,
 } from "./handlers/clinical";
 import { notificationHandlers, systemHandlers } from "./handlers/system";
+import { aiServiceHandlers } from "./handlers/ai-service";
+import { emrSyncHandlers } from "./handlers/emr-sync";
 
 /**
  * The complete mock handler registry.
@@ -30,8 +32,10 @@ export const MOCK_HANDLERS: HandlerMap = {
   ...appointmentHandlers,
   ...queueHandlers,
   ...emrHandlers,
+  ...emrSyncHandlers,
   ...diagnosticHandlers,
   ...aiSummaryHandlers,
+  ...aiServiceHandlers,
   ...notificationHandlers,
   ...systemHandlers,
 };
