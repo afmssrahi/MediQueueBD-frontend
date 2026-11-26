@@ -1,5 +1,6 @@
 import { clearDb, loadDb, saveDb } from "./storage";
 import { createSeedDatabase } from "./seed";
+import { publishDemoDbChange, type DemoDbChange } from "./sync";
 import type { DemoDatabase } from "./types";
 
 /**
@@ -19,13 +20,31 @@ export function readDb(): DemoDatabase {
   return seeded;
 }
 
-/** Apply a mutation and persist the result. */
+/**
+ * Apply a mutation and persist the result.
+ *
+ * The change is published on the demo bus afterwards, so every open screen
+ * refreshes itself instead of showing a stale list. Only the tables that
+ * actually changed are announced, so a booking does not force the whole app
+ * to re-query.
+ */
 export function writeDb(
   mutate: (db: DemoDatabase) => DemoDatabase,
 ): DemoDatabase {
   const current = readDb();
   const next = mutate(current);
   saveDb(next);
+
+  const changed = new Set<DemoDbChange["kind"]>();
+
+  if (next.appointments !== current.appointments) changed.add("appointments");
+  if (next.queueEvents !== current.queueEvents) changed.add("queue");
+  if (next.notifications !== current.notifications) changed.add("notifications");
+
+  for (const kind of changed) {
+    publishDemoDbChange({ kind });
+  }
+
   return next;
 }
 
@@ -34,6 +53,7 @@ export function resetDb(): DemoDatabase {
   clearDb();
   const seeded = createSeedDatabase();
   saveDb(seeded);
+  publishDemoDbChange({ kind: "all" });
   return seeded;
 }
 

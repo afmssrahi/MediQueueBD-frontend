@@ -8,6 +8,7 @@ import {
   type RescheduleRequest,
 } from "../services/appointment.service";
 import { useSession } from "@/stores/session";
+import type { AppointmentStatus } from "@/types";
 
 export const appointmentKeys = {
   all: ["appointments"] as const,
@@ -17,6 +18,23 @@ export const appointmentKeys = {
   slots: (doctorId: string, date: string) =>
     ["appointments", "slots", doctorId, date] as const,
 };
+
+/**
+ * Invalidate everything a booking touches.
+ *
+ * A booking changes the appointment list, the slot grid (the slot is now
+ * taken) and the queue (the patient is now in it). Leaving any of them stale
+ * is what makes a prototype feel broken.
+ */
+function invalidateAppointmentState(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  void queryClient.invalidateQueries({ queryKey: appointmentKeys.all });
+  void queryClient.invalidateQueries({ queryKey: ["slots"] });
+  void queryClient.invalidateQueries({ queryKey: ["queue"] });
+  void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin"] });
+}
 
 /** A list of appointments, filtered by the service. */
 export function useAppointments(filters: AppointmentFilters = {}) {
@@ -55,6 +73,10 @@ export function useSlots(doctorId: string | null, date: string | null) {
     queryKey: appointmentKeys.slots(doctorId ?? "", date ?? ""),
     queryFn: () => appointmentService.getSlots(doctorId as string, date as string),
     enabled: Boolean(doctorId && date),
+    // The slot grid is the part of the app that goes stale the fastest —
+    // another patient may take the slot while the grid is open.
+    staleTime: 5_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -66,9 +88,7 @@ export function useBookAppointment() {
     mutationFn: (payload: BookAppointmentRequest) =>
       appointmentService.book(payload),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: appointmentKeys.all });
-      void queryClient.invalidateQueries({ queryKey: ["queue"] });
-      void queryClient.invalidateQueries({ queryKey: ["slots"] });
+      invalidateAppointmentState(queryClient);
     },
   });
 }
@@ -81,8 +101,7 @@ export function useCancelAppointment() {
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
       appointmentService.cancel(id, reason),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: appointmentKeys.all });
-      void queryClient.invalidateQueries({ queryKey: ["slots"] });
+      invalidateAppointmentState(queryClient);
     },
   });
 }
@@ -95,8 +114,32 @@ export function useRescheduleAppointment() {
     mutationFn: ({ id, payload }: { id: string; payload: RescheduleRequest }) =>
       appointmentService.reschedule(id, payload),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: appointmentKeys.all });
-      void queryClient.invalidateQueries({ queryKey: ["slots"] });
+      invalidateAppointmentState(queryClient);
+    },
+  });
+}
+
+/**
+ * Change the status of an appointment.
+ *
+ * Used by the hospital screens — striking a patient off as a no-show, or
+ * reinstating a booking that was cancelled by mistake.
+ */
+export function useSetAppointmentStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      status,
+      reason,
+    }: {
+      id: string;
+      status: AppointmentStatus;
+      reason?: string;
+    }) => appointmentService.setStatus(id, status, reason),
+    onSuccess: () => {
+      invalidateAppointmentState(queryClient);
     },
   });
 }

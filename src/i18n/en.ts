@@ -367,6 +367,60 @@ export const en = {
     filterStatus: "Filter by status",
     filterType: "Filter by type",
     myAppointments: "My appointments",
+
+    // ── The realistic appointment rules ───────────────────────────────────
+    /** Why a slot is closed. */
+    slotReasonBooked: "Already booked",
+    slotReasonPast: "This time has passed",
+    slotReasonBreak: "The doctor is on a break",
+    slotReasonNotice: "Too close to book — the clinic needs more notice",
+    slotReasonClosed: "Not available",
+    currentSlot: "Your current time",
+    slotsFree: "free",
+    noClinicDays: "The doctor does not hold a clinic in the next two weeks.",
+    notClinicDay: "No clinic on this date",
+    notClinicDayHint:
+      "Pick a date the doctor works on — the clinic days are shown on the doctor's profile.",
+    breakNotice: "The doctor is on a break between {start} and {end}. No slots are offered then.",
+    policyHint:
+      "Appointments can be booked up to {days} days ahead, and at least {notice} minutes before the slot starts.",
+
+    // ── Managing a booking ───────────────────────────────────────────────
+    markNoShow: "Mark no-show",
+    markNoShowTitle: "Mark this patient as a no-show?",
+    markNoShowHint:
+      "The slot is released and the patient is struck off for this date.",
+    markedNoShow: "Marked as a no-show",
+    noShowReasonPlaceholder: "The patient did not arrive",
+    reinstate: "Reinstate",
+    reinstated: "The appointment was reinstated",
+    cancelledByStaff: "Cancelled by the hospital",
+    reasonRequired: "A reason is required",
+    cancelReasonPlaceholder: "Why are you cancelling?",
+    checkInHint: "Check {patient} in at reception?",
+    paid: "Paid",
+    unpaid: "Unpaid",
+
+    // ── The reception desk ───────────────────────────────────────────────
+    receptionTitle: "Appointment desk",
+    receptionSubtitle:
+      "Book for a patient at the counter, move a booking, or strike a patient off.",
+    staffBook: "Book for a patient",
+    staffBookTitle: "Book an appointment at the counter",
+    staffBookHint:
+      "The same rules apply as for a patient booking online — the same slots, the same window.",
+    patientPlaceholder: "Type the patient's name or id",
+    patientHint: "Start typing a name to find the patient.",
+    patientResolved: "Booking for {name}",
+    today: "Today",
+    allDates: "All dates",
+    allDoctors: "All doctors",
+    allStatuses: "All statuses",
+    appointmentsCount: "appointments",
+    awaiting: "Not yet arrived",
+    awaitingHint: "Booked or confirmed for today",
+    completed: "Completed",
+    noShow: "No-show",
   },
 
   doctors: {

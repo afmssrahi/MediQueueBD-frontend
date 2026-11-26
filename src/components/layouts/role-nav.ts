@@ -82,8 +82,7 @@ export const ROLE_NAV: Record<Role, NavSection[]> = {
         { href: "/hospital", labelKey: "nav.dashboard", icon: LayoutDashboard, matchPrefix: false },
         { href: "/hospital/queue", labelKey: "nav.queueBoard", icon: Activity },
         { href: "/hospital/appointments", labelKey: "nav.appointments", icon: CalendarDays },
-        { href: "/hospital/patients", labelKey: "nav.patientRecords", icon: FileText },
-      ],
+        { href: "/hospital/patients", labelKey: "nav.patientRecords", icon: FileText },      ],
     },
   ],
 
@@ -97,8 +96,7 @@ export const ROLE_NAV: Record<Role, NavSection[]> = {
         { href: "/hospital/admin/staff", labelKey: "nav.manageStaff", icon: Users },
         { href: "/hospital/admin/appointments", labelKey: "nav.appointments", icon: CalendarDays },
         { href: "/hospital/admin/queue", labelKey: "nav.queueOverview", icon: Activity },
-        { href: "/hospital/admin/analytics", labelKey: "nav.analytics", icon: LayoutDashboard },
-      ],
+        { href: "/hospital/admin/analytics", labelKey: "nav.analytics", icon: LayoutDashboard },      ],
     },
   ],
 

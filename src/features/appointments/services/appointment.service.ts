@@ -1,6 +1,6 @@
 import { API_ROUTES, buildPath } from "@/api/routes";
 import { request } from "@/services/request";
-import type { Appointment, Slot } from "@/types";
+import type { Appointment, AppointmentStatus, Slot } from "@/types";
 
 /** The appointment service. */
 
@@ -41,6 +41,11 @@ export interface DoctorSlots {
   sessionStart: number;
   sessionEnd: number;
   consultationFee: number;
+  /** The doctor's break, so the grid can explain the gaps in it. */
+  breakStart: number | null;
+  breakEnd: number | null;
+  /** False when the doctor does not hold a clinic on the date. */
+  isClinicDay: boolean;
   slots: Slot[];
 }
 
@@ -88,6 +93,26 @@ export const appointmentService = {
       method: API_ROUTES.rescheduleAppointment.method,
       path: buildPath(API_ROUTES.rescheduleAppointment, { id }),
       body: payload,
+    });
+    return data;
+  },
+
+  /**
+   * Change the status of an appointment.
+   *
+   * Only the administrative moves live here — striking a patient off as a
+   * no-show, or reinstating a booking. The live queue transitions go through
+   * the queue reducer.
+   */
+  async setStatus(
+    id: string,
+    status: AppointmentStatus,
+    reason?: string,
+  ): Promise<Appointment> {
+    const { data } = await request<Appointment>({
+      method: API_ROUTES.updateAppointmentStatus.method,
+      path: buildPath(API_ROUTES.updateAppointmentStatus, { id }),
+      body: { status, reason },
     });
     return data;
   },

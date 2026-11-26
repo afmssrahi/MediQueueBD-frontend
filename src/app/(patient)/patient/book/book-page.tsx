@@ -5,15 +5,21 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CalendarCheck, CalendarDays } from "lucide-react";
+import { CalendarCheck, CalendarDays, Info } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslation } from "@/i18n/provider";
 import { useSession } from "@/stores/session";
-import { useDoctors } from "@/features/doctors/hooks/use-doctors";
+import { useDoctors, useDoctorSchedule } from "@/features/doctors/hooks/use-doctors";
 import {
   useBookAppointment,
   useSlots,
 } from "@/features/appointments/hooks/use-appointments";
+import { useAppointmentPolicy } from "@/features/appointments/hooks/use-appointment-policy";
+import {
+  BreakNotice,
+  DatePicker,
+  SlotGrid,
+} from "@/features/appointments/components/slot-grid";
 import { PageHeader } from "@/components/shared/page-header";
 import { DemoBadge } from "@/components/shared/demo-badge";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -22,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -38,8 +45,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { APPOINTMENT_TYPES } from "@/lib/constants";
-import { addDaysIso, formatDate, formatMinute12, todayIso } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { formatDate, formatMinute12 } from "@/lib/format";
 
 const bookingSchema = z.object({
   date: z.string().min(1, "Choose a date"),
@@ -79,8 +85,10 @@ export function BookAppointmentPage() {
   } | null>(null);
 
   const doctors = useDoctors({});
+  const schedule = useDoctorSchedule(doctorId || null);
   const slots = useSlots(doctorId || null, date || null);
   const book = useBookAppointment();
+  const { policy } = useAppointmentPolicy();
 
   const form = useForm<BookingValues>({
     resolver: zodResolver(bookingSchema),
@@ -105,10 +113,17 @@ export function BookAppointmentPage() {
       name: ["date", "startMinute", "type", "paymentMethod", "reason"],
     });
 
-  const dates = React.useMemo(() => {
-    const start = todayIso();
-    return Array.from({ length: 14 }, (_, index) => addDaysIso(start, index));
-  }, []);
+  // Only the days the doctor actually holds a clinic are offered, and each
+  // one says how many slots are still free.
+  const dates = React.useMemo(
+    () =>
+      (schedule.data?.schedule ?? []).map((day) => ({
+        date: day.date,
+        available: day.available,
+        total: day.total,
+      })),
+    [schedule.data],
+  );
 
   const onSlotSelect = (minute: number) => {
     form.setValue("startMinute", minute, { shouldValidate: true });
@@ -148,6 +163,8 @@ export function BookAppointmentPage() {
           toast.error(error.message, {
             description: t("appointments.slotTakenHint"),
           });
+          // The slot grid may be stale, so it is refreshed straight away.
+          void slots.refetch();
         },
       },
     );
@@ -164,6 +181,8 @@ export function BookAppointmentPage() {
       </div>
     );
   }
+
+  const isClinicDay = slots.data?.isClinicDay ?? true;
 
   return (
     <div className="space-y-6">
@@ -224,29 +243,32 @@ export function BookAppointmentPage() {
               />
             ) : (
               <>
-                <div className="flex flex-wrap gap-2">
-                  {dates.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => {
-                        setDate(option);
-                        form.setValue("date", option, { shouldValidate: true });
-                        form.setValue("startMinute", 0);
-                      }}
-                      className={cn(
-                        "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                        date === option
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "hover:bg-accent",
-                      )}
-                    >
-                      {formatDate(option)}
-                    </button>
-                  ))}
-                </div>
+                <DatePicker
+                  dates={dates}
+                  value={date || null}
+                  onSelect={(option) => {
+                    setDate(option);
+                    form.setValue("date", option, { shouldValidate: true });
+                    form.setValue("startMinute", 0);
+                  }}
+                />
 
-                {!date ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("appointments.policyHint", {
+                    days: policy.appointmentLeadDays,
+                    notice: policy.minimumNoticeMinutes,
+                  })}
+                </p>
+
+                {date && !isClinicDay ? (
+                  <Alert variant="warning">
+                    <Info />
+                    <AlertTitle>{t("appointments.notClinicDay")}</AlertTitle>
+                    <AlertDescription>
+                      {t("appointments.notClinicDayHint")}
+                    </AlertDescription>
+                  </Alert>
+                ) : !date ? (
                   <p className="text-sm text-muted-foreground">
                     {t("appointments.selectDate")}
                   </p>
@@ -254,34 +276,18 @@ export function BookAppointmentPage() {
                   <p className="text-sm text-muted-foreground">
                     {t("common.loading")}
                   </p>
-                ) : (slots.data?.slots ?? []).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("appointments.noSlotsHint")}
-                  </p>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                    {(slots.data?.slots ?? []).map((slot) => (
-                      <button
-                        key={slot.startMinute}
-                        type="button"
-                        disabled={!slot.available}
-                        onClick={() => onSlotSelect(slot.startMinute)}
-                        className={cn(
-                          "rounded-md border px-2 py-2 text-xs font-medium transition-colors",
-                          !slot.available &&
-                            "cursor-not-allowed bg-muted/50 text-muted-foreground line-through",
-                          slot.available &&
-                            watchedStartMinute === slot.startMinute &&
-                            "border-primary bg-primary text-primary-foreground",
-                          slot.available &&
-                            watchedStartMinute !== slot.startMinute &&
-                            "hover:border-primary hover:bg-accent",
-                        )}
-                      >
-                        {formatMinute12(slot.startMinute)}
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <SlotGrid
+                      slots={slots.data?.slots ?? []}
+                      value={watchedStartMinute || null}
+                      onSelect={onSlotSelect}
+                    />
+                    <BreakNotice
+                      breakStart={slots.data?.breakStart ?? null}
+                      breakEnd={slots.data?.breakEnd ?? null}
+                    />
+                  </>
                 )}
               </>
             )}

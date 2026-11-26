@@ -165,6 +165,13 @@ export interface Doctor {
   defaultConsultationDuration: number;
   /** 0 = Sunday. */
   availableWeekdays: number[];
+  /**
+   * The midday break, in minutes since midnight.
+   *
+   * A doctor is not in the chair during the break, so no slot is offered then.
+   */
+  lunchBreakStart?: number | null;
+  lunchBreakEnd?: number | null;
   active: boolean;
 }
 
@@ -177,6 +184,14 @@ export interface DailySchedule {
   endMinute: number;
 }
 
+/** Why a slot cannot be booked. */
+export type SlotUnavailableReason =
+  | "BOOKED"
+  | "PAST"
+  | "BREAK"
+  | "NOTICE"
+  | "OUTSIDE_CLINIC";
+
 export interface Slot {
   doctorId: string;
   date: string;
@@ -186,6 +201,8 @@ export interface Slot {
   available: boolean;
   /** Present when the slot has been taken. */
   appointmentId?: string | null;
+  /** Why the slot is closed. Null when the slot is free. */
+  unavailableReason?: SlotUnavailableReason | null;
 }
 
 export interface Appointment {
@@ -213,7 +230,14 @@ export interface Appointment {
   cancelledAt?: string | null;
   cancelReason?: string | null;
   notes?: string | null;
+  /** Who made the booking — the patient, or a member of staff. */
+  bookedBy?: string | null;
+  /** Where the booking came from. */
+  source?: AppointmentSource | null;
 }
+
+/** Where a booking came from. */
+export type AppointmentSource = "PATIENT" | "STAFF";
 
 export const APPOINTMENT_STATUSES = [
   "BOOKED",
@@ -717,6 +741,10 @@ export interface HospitalStaff {
 
 export interface SystemSettings {
   appointmentLeadDays: number;
+  /** How long before a slot the patient must confirm. */
+  minimumNoticeMinutes: number;
+  /** How long before an appointment it may still be changed. */
+  changeCutoffMinutes: number;
   slotDurationMinutes: number;
   arrivalBufferMinutes: number;
   gracePeriodMinutes: number;

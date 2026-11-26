@@ -22,6 +22,8 @@ export const API_ROUTES = {
   changePassword: { method: "POST", path: "/users/me/password" },
   listUsers: { method: "GET", path: "/users" },
   updateUserStatus: { method: "PATCH", path: "/users/:id/status" },
+  /** The patients of a hospital — what the reception desk books for. */
+  listPatients: { method: "GET", path: "/patients" },
 
   // ── Hospitals ───────────────────────────────────────────────────────────
   listHospitals: { method: "GET", path: "/hospitals" },
@@ -47,6 +49,8 @@ export const API_ROUTES = {
   createAppointment: { method: "POST", path: "/appointments" },
   cancelAppointment: { method: "POST", path: "/appointments/:id/cancel" },
   rescheduleAppointment: { method: "PATCH", path: "/appointments/:id/reschedule" },
+  /** The administrative status moves — no-show, reinstated, cancelled by staff. */
+  updateAppointmentStatus: { method: "PATCH", path: "/appointments/:id/status" },
   listSlots: { method: "GET", path: "/slots" },
 
   // ── Queue ───────────────────────────────────────────────────────────────

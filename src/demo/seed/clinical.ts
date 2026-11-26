@@ -29,6 +29,10 @@ export const TODAY = format(new Date(), "yyyy-MM-dd");
 /** The demo queue rules — the same values the queue engine uses. */
 export const DEFAULT_SETTINGS: SystemSettings = {
   appointmentLeadDays: 14,
+  /** A patient must confirm at least two hours before the slot. */
+  minimumNoticeMinutes: 120,
+  /** A booking can be changed up to two hours before it starts. */
+  changeCutoffMinutes: 120,
   slotDurationMinutes: 15,
   arrivalBufferMinutes: 10,
   gracePeriodMinutes: 5,

@@ -5,6 +5,7 @@ import { useTranslation } from "@/i18n/provider";
 import { useSession } from "@/stores/session";
 import { useDoctors } from "@/features/doctors/hooks/use-doctors";
 import { useAppointments } from "@/features/appointments/hooks/use-appointments";
+import { StaffAppointmentActions } from "@/features/appointments/components/staff-appointment-actions";
 import { PageHeader } from "@/components/shared/page-header";
 import { DemoBadge } from "@/components/shared/demo-badge";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -92,6 +93,18 @@ export default function DoctorAppointmentsPage() {
       sortValue: (row) => row.status,
       cell: (row) => (
         <StatusBadge status={row.status} label={t(`status.${row.status}`)} />
+      ),
+    },
+    {
+      key: "actions",
+      header: t("common.actions"),
+      cell: (row) => (
+        // A booking that has run its course cannot be changed any more.
+        ["COMPLETED", "CANCELLED", "NO_SHOW"].includes(row.status) ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <StaffAppointmentActions appointment={row} />
+        )
       ),
     },
   ];

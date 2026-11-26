@@ -255,6 +255,16 @@ export const userHandlers: HandlerMap = {
   "GET /users": (request) => {
     const query = queryOf(request);
     const db = readDb();
+    const actor = db.users.find((item) => item.id === request.userId);
+
+    // Only the system administrator sees the whole user directory.
+    if (!actor || actor.role !== "SYSTEM_ADMIN") {
+      return fail(
+        "NOT_ALLOWED",
+        "Only the system administrator can list the user directory.",
+        403,
+      );
+    }
 
     let users = db.users;
 
@@ -275,6 +285,55 @@ export const userHandlers: HandlerMap = {
     return ok(
       users.map(toPublicUser),
       { total: users.length, page: 1, pageSize: users.length, totalPages: 1 },
+    );
+  },
+
+  "GET /patients": (request) => {
+    const query = queryOf(request);
+    const db = readDb();
+    const actor = db.users.find((item) => item.id === request.userId);
+
+    // A patient may only look themselves up.
+    if (!actor) return ok([]);
+
+    if (actor.role === "PATIENT") {
+      return ok([toPublicUser(actor)]);
+    }
+
+    // Staff see the patients of their own hospital — the people whose
+    // appointments they book at the counter.
+    const hospitalId = query.hospitalId ?? actor.hospitalId ?? undefined;
+
+    if (!hospitalId || !actor.hospitalId || hospitalId !== actor.hospitalId) {
+      if (actor.role !== "SYSTEM_ADMIN") {
+        return fail(
+          "NOT_ALLOWED",
+          "You can only look up the patients of your own hospital.",
+          403,
+        );
+      }
+    }
+
+    const patientIds = new Set(
+      db.appointments
+        .filter((item) => item.hospitalId === hospitalId)
+        .map((item) => item.patientId),
+    );
+
+    let patients = db.users.filter(
+      (item) => item.role === "PATIENT" && patientIds.has(item.id),
+    );
+
+    if (query.search) {
+      const needle = query.search.toLowerCase();
+      patients = patients.filter((item) =>
+        `${item.name} ${item.email} ${item.phone}`.toLowerCase().includes(needle),
+      );
+    }
+
+    return ok(
+      patients.map(toPublicUser),
+      { total: patients.length, page: 1, pageSize: patients.length, totalPages: 1 },
     );
   },
 

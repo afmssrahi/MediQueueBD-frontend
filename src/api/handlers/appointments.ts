@@ -1,7 +1,12 @@
 import { fail, ok } from "@/api/envelope";
 import { readDb, writeDb } from "@/demo/db";
 import { format, parseISO } from "date-fns";
-import type { Appointment, Slot } from "@/types";
+import type {
+  AppNotification,
+  Appointment,
+  AppointmentStatus,
+  Slot,
+} from "@/types";
 import {
   bookableDates,
   findSlotConflict,
@@ -9,33 +14,139 @@ import {
   isDoctorAvailableOn,
   nextTokenNumber,
 } from "@/domain/appointments/slots";
+import {
+  DEFAULT_POLICY,
+  checkBookingAllowed,
+  checkChangeAllowed,
+  canTransition,
+  isLocked,
+  isStaffRole,
+  type AppointmentPolicySettings,
+} from "@/domain/appointments/policy";
 import { bodyOf, queryOf, type HandlerMap } from "../mock-transport";
 
-/** Appointments a user is allowed to see. */
+/**
+ * The appointment endpoints.
+ *
+ * Every rule that matters lives in `src/domain/appointments/policy.ts`, so
+ * the browser and the future backend enforce exactly the same things.
+ */
+
+/** Today, as an ISO string. */
+function todayIso(): string {
+  return format(new Date(), "yyyy-MM-dd");
+}
+
+/** The current time, in minutes since midnight. */
+function nowMinute(): number {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+/** The policy settings, taken from the demo database. */
+function policyOf(settings: {
+  appointmentLeadDays: number;
+  minimumNoticeMinutes?: number;
+  changeCutoffMinutes?: number;
+}): AppointmentPolicySettings {
+  return {
+    appointmentLeadDays: settings.appointmentLeadDays,
+    minimumNoticeMinutes:
+      settings.minimumNoticeMinutes ?? DEFAULT_POLICY.minimumNoticeMinutes,
+    changeCutoffMinutes:
+      settings.changeCutoffMinutes ?? DEFAULT_POLICY.changeCutoffMinutes,
+  };
+}
+
+/** The signed-in user's record, when there is one. */
+function actorOf(userId: string | null | undefined) {
+  if (!userId) return null;
+  const db = readDb();
+  return db.users.find((item) => item.id === userId) ?? null;
+}
+
+/**
+ * Appointments a user is allowed to see.
+ *
+ * A patient sees their own. A doctor sees their own list. Hospital staff and
+ * administrators see their hospital. Only a system administrator sees the
+ * whole platform.
+ */
 function scopeAppointments(
   appointments: Appointment[],
-  userId: string | null | undefined,
-  role: string | undefined,
+  actor: ReturnType<typeof actorOf>,
 ): Appointment[] {
-  if (!userId) return appointments;
+  if (!actor) return [];
 
-  if (role === "PATIENT") {
-    return appointments.filter((item) => item.patientId === userId);
+  if (actor.role === "PATIENT") {
+    return appointments.filter((item) => item.patientId === actor.id);
   }
 
-  return appointments;
+  if (actor.role === "DOCTOR") {
+    if (!actor.doctorId) return [];
+    return appointments.filter((item) => item.doctorId === actor.doctorId);
+  }
+
+  if (actor.role === "HOSPITAL_STAFF" || actor.role === "HOSPITAL_ADMIN") {
+    if (!actor.hospitalId) return [];
+    return appointments.filter((item) => item.hospitalId === actor.hospitalId);
+  }
+
+  if (actor.role === "SYSTEM_ADMIN") return appointments;
+
+  // Diagnostic staff have no business with appointments.
+  return [];
+}
+
+/** May this actor see this one appointment? */
+function canSee(
+  appointment: Appointment,
+  actor: ReturnType<typeof actorOf>,
+): boolean {
+  if (!actor) return false;
+  if (actor.role === "SYSTEM_ADMIN") return true;
+
+  if (actor.role === "PATIENT") return appointment.patientId === actor.id;
+
+  if (actor.role === "DOCTOR") {
+    return Boolean(actor.doctorId) && appointment.doctorId === actor.doctorId;
+  }
+
+  if (actor.role === "HOSPITAL_STAFF" || actor.role === "HOSPITAL_ADMIN") {
+    return Boolean(actor.hospitalId) && appointment.hospitalId === actor.hospitalId;
+  }
+
+  return false;
+}
+
+/** Build a notification for a user. */
+function buildNotification(
+  db: { counters: { notification: number } },
+  userId: string,
+  type: AppNotification["type"],
+  title: string,
+  body: string,
+  href: string | null,
+): AppNotification {
+  return {
+    id: `NT${db.counters.notification + 1}`,
+    userId,
+    type,
+    title,
+    body,
+    read: false,
+    createdAt: new Date().toISOString(),
+    href,
+  };
 }
 
 export const appointmentHandlers: HandlerMap = {
   "GET /appointments": (request) => {
     const query = queryOf(request);
     const db = readDb();
+    const actor = actorOf(request.userId);
 
-    let appointments = scopeAppointments(
-      db.appointments,
-      request.userId,
-      query.role,
-    );
+    let appointments = scopeAppointments(db.appointments, actor);
 
     if (query.patientId) {
       appointments = appointments.filter(
@@ -72,7 +183,7 @@ export const appointmentHandlers: HandlerMap = {
     if (query.search) {
       const needle = query.search.toLowerCase();
       appointments = appointments.filter((item) =>
-        `${item.patientName} ${item.doctorName} ${item.hospitalName} ${item.tokenNumber}`
+        `${item.patientName} ${item.doctorName} ${item.hospitalName} ${item.tokenNumber} ${item.reason}`
           .toLowerCase()
           .includes(needle),
       );
@@ -101,10 +212,15 @@ export const appointmentHandlers: HandlerMap = {
   "GET /appointments/:id": (request) => {
     const query = queryOf(request);
     const db = readDb();
+    const actor = actorOf(request.userId);
     const appointment = db.appointments.find((item) => item.id === query.id);
 
     if (!appointment) {
       return fail("NOT_FOUND", "No such appointment.", 404);
+    }
+
+    if (!canSee(appointment, actor)) {
+      return fail("NOT_ALLOWED", "You cannot view this appointment.", 403);
     }
 
     return ok(appointment);
@@ -113,19 +229,28 @@ export const appointmentHandlers: HandlerMap = {
   "POST /appointments": (request) => {
     const body = bodyOf(request);
     const db = readDb();
+    const actor = actorOf(request.userId);
 
     const doctorId = String(body.doctorId ?? "");
     const date = String(body.date ?? "");
     const startMinute = Number(body.startMinute);
-    const patientId = String(body.patientId ?? request.userId ?? "");
+    const requestedPatientId = String(body.patientId ?? request.userId ?? "");
 
     const fields: Record<string, string> = {};
     if (!doctorId) fields.doctorId = "Choose a doctor";
     if (!date) fields.date = "Choose a date";
     if (!Number.isFinite(startMinute)) fields.startMinute = "Choose a slot";
-    if (!patientId) fields.patientId = "Choose a patient";
+    if (!requestedPatientId) fields.patientId = "Choose a patient";
     if (Object.keys(fields).length > 0) {
       return fail("VALIDATION_ERROR", "Please correct the highlighted fields.", 400, fields);
+    }
+
+    // A patient books for themselves. Staff may book on behalf of a patient.
+    const bookingOnBehalf = isStaffRole(actor?.role);
+    const patientId = bookingOnBehalf ? requestedPatientId : (actor?.id ?? "");
+
+    if (!bookingOnBehalf && requestedPatientId && actor && requestedPatientId !== actor.id) {
+      return fail("NOT_ALLOWED", "You can only book an appointment for yourself.", 403);
     }
 
     const doctor = db.doctors.find((item) => item.id === doctorId);
@@ -138,20 +263,16 @@ export const appointmentHandlers: HandlerMap = {
       return fail("NOT_FOUND", "No such patient.", 404);
     }
 
-    if (!isDoctorAvailableOn(doctor, date)) {
-      return fail(
-        "DOCTOR_UNAVAILABLE",
-        "The doctor does not hold a clinic on that date.",
-        400,
-        { date: "The doctor is not available on that date" },
-      );
-    }
+    const policy = policyOf(db.settings);
+    const today = todayIso();
+    const now = nowMinute();
 
     const slots = generateSlots(
       doctor,
       date,
       db.appointments,
       db.settings.slotDurationMinutes,
+      { today, nowMinute: now, minimumNoticeMinutes: policy.minimumNoticeMinutes },
     );
 
     const conflict = findSlotConflict(slots, startMinute, db.appointments, {
@@ -159,12 +280,25 @@ export const appointmentHandlers: HandlerMap = {
       date,
     });
 
-    if (conflict) {
+    const decision = checkBookingAllowed({
+      patientId,
+      doctorId,
+      date,
+      startMinute,
+      appointments: db.appointments,
+      isClinicDay: isDoctorAvailableOn(doctor, date),
+      slotIsTaken: conflict !== null,
+      today,
+      nowMinute: now,
+      settings: policy,
+    });
+
+    if (!decision.allowed) {
       return fail(
-        "SLOT_TAKEN",
-        "This slot has just been taken. Please pick another slot.",
-        409,
-        { startMinute: "This slot is no longer available" },
+        decision.refusal.code,
+        decision.refusal.message,
+        decision.refusal.code === "SLOT_TAKEN" ? 409 : 400,
+        decision.refusal.field ? { [decision.refusal.field]: decision.refusal.message } : undefined,
       );
     }
 
@@ -178,8 +312,21 @@ export const appointmentHandlers: HandlerMap = {
       );
     }
 
-    const department = db.departments.find(
-      (item) => doctor.departmentIds.includes(item.id),
+    if (!slot.available) {
+      return fail(
+        "INVALID_SLOT",
+        slot.unavailableReason === "PAST"
+          ? "That time has already passed."
+          : slot.unavailableReason === "BREAK"
+            ? "The doctor is on a break at that time."
+            : "That slot is not available.",
+        400,
+        { startMinute: "That slot is not available" },
+      );
+    }
+
+    const department = db.departments.find((item) =>
+      doctor.departmentIds.includes(item.id),
     );
     const hospital = db.hospitals.find((item) =>
       doctor.hospitalIds.includes(item.id),
@@ -208,14 +355,27 @@ export const appointmentHandlers: HandlerMap = {
       cancelledAt: null,
       cancelReason: null,
       notes: (body.notes as string) ?? null,
+      bookedBy: actor?.id ?? patient.id,
+      source: bookingOnBehalf ? "STAFF" : "PATIENT",
     };
+
+    const notification = buildNotification(
+      db,
+      patient.id,
+      "APPOINTMENT",
+      `Appointment confirmed — token ${created.tokenNumber}`,
+      `${doctor.name} on ${format(parseISO(date), "d MMM yyyy")}. Token ${created.tokenNumber}.`,
+      "/patient/appointments",
+    );
 
     writeDb((current) => ({
       ...current,
       appointments: [...current.appointments, created],
+      notifications: [notification, ...current.notifications],
       counters: {
         ...current.counters,
         appointment: current.counters.appointment + 1,
+        notification: current.counters.notification + 1,
       },
     }));
 
@@ -226,17 +386,43 @@ export const appointmentHandlers: HandlerMap = {
     const query = queryOf(request);
     const body = bodyOf(request);
     const db = readDb();
+    const actor = actorOf(request.userId);
     const appointment = db.appointments.find((item) => item.id === query.id);
 
     if (!appointment) {
       return fail("NOT_FOUND", "No such appointment.", 404);
     }
 
-    if (["COMPLETED", "CANCELLED"].includes(appointment.status)) {
+    if (!canSee(appointment, actor)) {
+      return fail("NOT_ALLOWED", "You cannot change this appointment.", 403);
+    }
+
+    const decision = checkChangeAllowed({
+      appointment,
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role,
+      actorHospitalId: actor?.hospitalId,
+      actorDoctorId: actor?.doctorId,
+      today: todayIso(),
+      nowMinute: nowMinute(),
+      settings: policyOf(db.settings),
+    });
+
+    if (!decision.allowed) {
       return fail(
-        "INVALID_TRANSITION",
-        `An appointment that is already ${appointment.status.toLowerCase()} cannot be cancelled.`,
-        409,
+        decision.refusal.code,
+        decision.refusal.message,
+        403,
+      );
+    }
+
+    const reason = String(body.reason ?? "").trim();
+    if (!reason) {
+      return fail(
+        "VALIDATION_ERROR",
+        "Please give a reason for the cancellation.",
+        400,
+        { reason: "A reason is required" },
       );
     }
 
@@ -244,14 +430,28 @@ export const appointmentHandlers: HandlerMap = {
       ...appointment,
       status: "CANCELLED",
       cancelledAt: new Date().toISOString(),
-      cancelReason: String(body.reason ?? "Cancelled by the patient."),
+      cancelReason: reason,
     };
+
+    const notification = buildNotification(
+      db,
+      appointment.patientId,
+      "APPOINTMENT",
+      "Your appointment was cancelled",
+      `${appointment.doctorName} on ${format(parseISO(appointment.date), "d MMM yyyy")} was cancelled. Reason: ${reason}`,
+      "/patient/appointments",
+    );
 
     writeDb((current) => ({
       ...current,
       appointments: current.appointments.map((item) =>
         item.id === updated.id ? updated : item,
       ),
+      notifications: [notification, ...current.notifications],
+      counters: {
+        ...current.counters,
+        notification: current.counters.notification + 1,
+      },
     }));
 
     return ok(updated);
@@ -261,18 +461,30 @@ export const appointmentHandlers: HandlerMap = {
     const query = queryOf(request);
     const body = bodyOf(request);
     const db = readDb();
+    const actor = actorOf(request.userId);
     const appointment = db.appointments.find((item) => item.id === query.id);
 
     if (!appointment) {
       return fail("NOT_FOUND", "No such appointment.", 404);
     }
 
-    if (["COMPLETED", "CANCELLED"].includes(appointment.status)) {
-      return fail(
-        "INVALID_TRANSITION",
-        `An appointment that is already ${appointment.status.toLowerCase()} cannot be rescheduled.`,
-        409,
-      );
+    if (!canSee(appointment, actor)) {
+      return fail("NOT_ALLOWED", "You cannot change this appointment.", 403);
+    }
+
+    const decision = checkChangeAllowed({
+      appointment,
+      actorId: actor?.id ?? null,
+      actorRole: actor?.role,
+      actorHospitalId: actor?.hospitalId,
+      actorDoctorId: actor?.doctorId,
+      today: todayIso(),
+      nowMinute: nowMinute(),
+      settings: policyOf(db.settings),
+    });
+
+    if (!decision.allowed) {
+      return fail(decision.refusal.code, decision.refusal.message, 403);
     }
 
     const date = String(body.date ?? appointment.date);
@@ -283,11 +495,25 @@ export const appointmentHandlers: HandlerMap = {
       return fail("NOT_FOUND", "The doctor for this appointment no longer exists.", 404);
     }
 
+    if (!isDoctorAvailableOn(doctor, date)) {
+      return fail(
+        "DOCTOR_UNAVAILABLE",
+        "The doctor does not hold a clinic on that date.",
+        400,
+        { date: "The doctor is not available on that date" },
+      );
+    }
+
+    const today = todayIso();
+    const now = nowMinute();
+    const policy = policyOf(db.settings);
+
     const slots = generateSlots(
       doctor,
       date,
       db.appointments,
       db.settings.slotDurationMinutes,
+      { today, nowMinute: now, minimumNoticeMinutes: policy.minimumNoticeMinutes },
     );
 
     const conflict = findSlotConflict(slots, startMinute, db.appointments, {
@@ -315,6 +541,19 @@ export const appointmentHandlers: HandlerMap = {
       );
     }
 
+    if (!slot.available) {
+      return fail(
+        "INVALID_SLOT",
+        slot.unavailableReason === "PAST"
+          ? "That time has already passed."
+          : slot.unavailableReason === "BREAK"
+            ? "The doctor is on a break at that time."
+            : "That slot is not available.",
+        400,
+        { startMinute: "That slot is not available" },
+      );
+    }
+
     const updated: Appointment = {
       ...appointment,
       date,
@@ -326,11 +565,110 @@ export const appointmentHandlers: HandlerMap = {
       tokenNumber: appointment.tokenNumber,
     };
 
+    const notification = buildNotification(
+      db,
+      appointment.patientId,
+      "APPOINTMENT",
+      "Your appointment was moved",
+      `${doctor.name} on ${format(parseISO(date), "d MMM yyyy")}. Your token number stays ${appointment.tokenNumber}.`,
+      "/patient/appointments",
+    );
+
     writeDb((current) => ({
       ...current,
       appointments: current.appointments.map((item) =>
         item.id === updated.id ? updated : item,
       ),
+      notifications: [notification, ...current.notifications],
+      counters: {
+        ...current.counters,
+        notification: current.counters.notification + 1,
+      },
+    }));
+
+    return ok(updated);
+  },
+
+  /**
+   * Change the status of an appointment.
+   *
+   * The live transitions — check in, call, start, complete — belong to the
+   * queue reducer, which drives the waiting-time engine. This endpoint is for
+   * the administrative moves that sit outside that ladder: striking a patient
+   * off as a no-show, or reinstating a booking.
+   */
+  "PATCH /appointments/:id/status": (request) => {
+    const query = queryOf(request);
+    const body = bodyOf(request);
+    const db = readDb();
+    const actor = actorOf(request.userId);
+    const appointment = db.appointments.find((item) => item.id === query.id);
+
+    if (!appointment) {
+      return fail("NOT_FOUND", "No such appointment.", 404);
+    }
+
+    if (!canSee(appointment, actor)) {
+      return fail("NOT_ALLOWED", "You cannot change this appointment.", 403);
+    }
+
+    const nextStatus = String(body.status ?? "") as AppointmentStatus;
+
+    if (!isStaffRole(actor?.role)) {
+      return fail(
+        "NOT_ALLOWED",
+        "Only hospital staff can change the status of an appointment.",
+        403,
+      );
+    }
+
+    if (isLocked(appointment.status)) {
+      return fail(
+        "INVALID_TRANSITION",
+        `An appointment that is already ${appointment.status.toLowerCase()} cannot be changed.`,
+        409,
+      );
+    }
+
+    if (!canTransition(appointment.status, nextStatus)) {
+      return fail(
+        "INVALID_TRANSITION",
+        `An appointment cannot move from ${appointment.status} to ${nextStatus}.`,
+        409,
+      );
+    }
+
+    const updated: Appointment = {
+      ...appointment,
+      status: nextStatus,
+      cancelledAt:
+        nextStatus === "CANCELLED" ? new Date().toISOString() : appointment.cancelledAt,
+      cancelReason:
+        nextStatus === "CANCELLED"
+          ? String(body.reason ?? "Cancelled by the hospital.")
+          : appointment.cancelReason,
+      notes: body.notes !== undefined ? String(body.notes) : appointment.notes,
+    };
+
+    const notification = buildNotification(
+      db,
+      appointment.patientId,
+      "APPOINTMENT",
+      `Your appointment is now ${nextStatus.toLowerCase().replace(/_/g, " ")}`,
+      `${appointment.doctorName} on ${format(parseISO(appointment.date), "d MMM yyyy")}. Token ${appointment.tokenNumber}.`,
+      "/patient/appointments",
+    );
+
+    writeDb((current) => ({
+      ...current,
+      appointments: current.appointments.map((item) =>
+        item.id === updated.id ? updated : item,
+      ),
+      notifications: [notification, ...current.notifications],
+      counters: {
+        ...current.counters,
+        notification: current.counters.notification + 1,
+      },
     }));
 
     return ok(updated);
@@ -355,11 +693,16 @@ export const appointmentHandlers: HandlerMap = {
       return fail("NOT_FOUND", "No such doctor.", 404);
     }
 
+    const today = todayIso();
+    const now = nowMinute();
+    const policy = policyOf(db.settings);
+
     const slots = generateSlots(
       doctor,
       date,
       db.appointments,
       db.settings.slotDurationMinutes,
+      { today, nowMinute: now, minimumNoticeMinutes: policy.minimumNoticeMinutes },
     );
 
     const doctorPayload = {
@@ -369,6 +712,10 @@ export const appointmentHandlers: HandlerMap = {
       sessionStart: doctor.sessionStart,
       sessionEnd: doctor.sessionEnd,
       consultationFee: doctor.consultationFee,
+      /** The break is shown so the grid explains the gaps in it. */
+      breakStart: doctor.lunchBreakStart ?? null,
+      breakEnd: doctor.lunchBreakEnd ?? null,
+      isClinicDay: isDoctorAvailableOn(doctor, date),
       slots,
     };
 
@@ -384,8 +731,11 @@ export const appointmentHandlers: HandlerMap = {
       return fail("NOT_FOUND", "No such doctor.", 404);
     }
 
-    const fromDate = query.from ?? format(new Date(), "yyyy-MM-dd");
+    const fromDate = query.from ?? todayIso();
     const dates = bookableDates(doctor, fromDate, 14);
+    const today = todayIso();
+    const now = nowMinute();
+    const policy = policyOf(db.settings);
 
     const schedule = dates.map((date) => {
       const slots = generateSlots(
@@ -393,6 +743,7 @@ export const appointmentHandlers: HandlerMap = {
         date,
         db.appointments,
         db.settings.slotDurationMinutes,
+        { today, nowMinute: now, minimumNoticeMinutes: policy.minimumNoticeMinutes },
       );
       return {
         date,
@@ -419,8 +770,11 @@ export const appointmentHandlers: HandlerMap = {
       return fail("NOT_FOUND", "No such doctor.", 404);
     }
 
-    const fromDate = query.from ?? format(new Date(), "yyyy-MM-dd");
+    const fromDate = query.from ?? todayIso();
     const dates = bookableDates(doctor, fromDate, 14);
+    const today = todayIso();
+    const now = nowMinute();
+    const policy = policyOf(db.settings);
 
     const availability = dates.map((date) => {
       const slots = generateSlots(
@@ -428,6 +782,7 @@ export const appointmentHandlers: HandlerMap = {
         date,
         db.appointments,
         db.settings.slotDurationMinutes,
+        { today, nowMinute: now, minimumNoticeMinutes: policy.minimumNoticeMinutes },
       );
       const available = slots.filter((slot: Slot) => slot.available).length;
       const total = slots.length;
@@ -448,5 +803,3 @@ export const appointmentHandlers: HandlerMap = {
     });
   },
 };
-
-export { parseISO };

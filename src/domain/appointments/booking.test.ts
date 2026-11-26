@@ -6,7 +6,7 @@ import { addDaysIso, todayIso, weekdayOf } from "@/lib/format";
 import type { Appointment, Slot } from "@/types";
 
 /**
- * The Phase 3 booking gate.
+ * The appointment booking lifecycle.
  *
  * book → confirm → appears in the patient's list → cancel → the slot frees up
  * → reschedule works, and a second attempt at the same slot is rejected.
@@ -21,14 +21,18 @@ const PATIENT_ID = "U001";
 async function call<T>(
   method: string,
   path: string,
-  options: { query?: Record<string, string>; body?: unknown } = {},
+  options: {
+    query?: Record<string, string>;
+    body?: unknown;
+    userId?: string;
+  } = {},
 ): Promise<T> {
   const request: TransportRequest = {
     method,
     path,
     query: options.query,
     body: options.body,
-    userId: PATIENT_ID,
+    userId: options.userId ?? PATIENT_ID,
   };
 
   const response = await mockTransport.request<T>(request);
@@ -38,6 +42,25 @@ async function call<T>(
   }
 
   return response.data;
+}
+
+/** Send a request and keep the failure envelope. */
+async function callRaw<T>(
+  method: string,
+  path: string,
+  options: {
+    query?: Record<string, string>;
+    body?: unknown;
+    userId?: string;
+  } = {},
+) {
+  return mockTransport.request<T>({
+    method,
+    path,
+    query: options.query,
+    body: options.body,
+    userId: options.userId ?? PATIENT_ID,
+  });
 }
 
 /**
@@ -64,6 +87,38 @@ function firstBookableDate(doctorId: string): string {
   throw new Error("The seed has no bookable date in the next two weeks.");
 }
 
+/** The first free slot of a doctor on a date. */
+async function firstFreeSlot(
+  doctorId: string,
+  date: string,
+): Promise<Slot> {
+  const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
+    query: { doctorId, date },
+  });
+  const free = slots.slots.find((slot) => slot.available);
+  if (!free) throw new Error("The seed has no free slot on that date.");
+  return free;
+}
+
+/** The body of a booking. */
+function bookingBody(
+  doctorId: string,
+  date: string,
+  startMinute: number,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    patientId: PATIENT_ID,
+    doctorId,
+    date,
+    startMinute,
+    type: "New",
+    reason: "Recurring headache for two weeks",
+    paymentMethod: "Cash",
+    ...overrides,
+  };
+}
+
 describe("the appointment booking lifecycle", () => {
   beforeEach(() => {
     resetDb();
@@ -83,16 +138,7 @@ describe("the appointment booking lifecycle", () => {
     expect(free).toBeDefined();
 
     const appointment = await call<Appointment>("POST", "/appointments", {
-      body: {
-        patientId: PATIENT_ID,
-        doctorId,
-        date,
-        startMinute: free!.startMinute,
-        type: "New",
-        reason: "Recurring headache for two weeks",
-        paymentMethod: "Bkash",
-        isPaid: true,
-      },
+      body: bookingBody(doctorId, date, free!.startMinute),
     });
 
     expect(appointment.tokenNumber).toBeGreaterThan(0);
@@ -108,21 +154,10 @@ describe("the appointment booking lifecycle", () => {
     const doctorId = doctors[0].id;
     const date = firstBookableDate(doctorId);
 
-    const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
-      query: { doctorId, date },
-    });
-    const free = slots.slots.find((slot) => slot.available)!;
+    const free = await firstFreeSlot(doctorId, date);
 
     const booked = await call<Appointment>("POST", "/appointments", {
-      body: {
-        patientId: PATIENT_ID,
-        doctorId,
-        date,
-        startMinute: free.startMinute,
-        type: "New",
-        reason: "Follow-up on a medication change",
-        paymentMethod: "Cash",
-      },
+      body: bookingBody(doctorId, date, free.startMinute),
     });
 
     const mine = await call<Appointment[]>("GET", "/appointments", {
@@ -139,29 +174,17 @@ describe("the appointment booking lifecycle", () => {
     const doctorId = doctors[0].id;
     const date = firstBookableDate(doctorId);
 
-    const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
-      query: { doctorId, date },
+    const free = await firstFreeSlot(doctorId, date);
+
+    await call<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free.startMinute),
     });
-    const free = slots.slots.find((slot) => slot.available)!;
-
-    const body = {
-      patientId: PATIENT_ID,
-      doctorId,
-      date,
-      startMinute: free.startMinute,
-      type: "New",
-      reason: "A first booking for this slot",
-      paymentMethod: "Cash",
-    };
-
-    await call<Appointment>("POST", "/appointments", { body });
 
     // The second attempt must fail with the double-booking guard.
-    const response = await mockTransport.request<Appointment>({
-      method: "POST",
-      path: "/appointments",
-      body: { ...body, reason: "A second booking for the same slot" },
-      userId: PATIENT_ID,
+    const response = await callRaw<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free.startMinute, {
+        reason: "A second booking for the same slot",
+      }),
     });
 
     expect(response.success).toBe(false);
@@ -177,21 +200,10 @@ describe("the appointment booking lifecycle", () => {
     const doctorId = doctors[0].id;
     const date = firstBookableDate(doctorId);
 
-    const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
-      query: { doctorId, date },
-    });
-    const free = slots.slots.find((slot) => slot.available)!;
+    const free = await firstFreeSlot(doctorId, date);
 
     const booked = await call<Appointment>("POST", "/appointments", {
-      body: {
-        patientId: PATIENT_ID,
-        doctorId,
-        date,
-        startMinute: free.startMinute,
-        type: "New",
-        reason: "A booking that will be cancelled",
-        paymentMethod: "Cash",
-      },
+      body: bookingBody(doctorId, date, free.startMinute),
     });
 
     // The slot is taken while the booking is live.
@@ -235,15 +247,7 @@ describe("the appointment booking lifecycle", () => {
     const target = free[1];
 
     const booked = await call<Appointment>("POST", "/appointments", {
-      body: {
-        patientId: PATIENT_ID,
-        doctorId,
-        date,
-        startMinute: taken.startMinute,
-        type: "New",
-        reason: "A booking that will be rescheduled",
-        paymentMethod: "Cash",
-      },
+      body: bookingBody(doctorId, date, taken.startMinute),
     });
 
     const rescheduled = await call<Appointment>(
@@ -282,36 +286,34 @@ describe("the appointment booking lifecycle", () => {
     });
     const free = slots.slots.filter((slot) => slot.available);
 
+    // Two different patients take the two slots, so the reschedule has a
+    // genuine conflict to hit. Each patient books for themselves.
     const first = await call<Appointment>("POST", "/appointments", {
+      userId: "U101",
       body: {
-        patientId: PATIENT_ID,
-        doctorId,
-        date,
-        startMinute: free[0].startMinute,
-        type: "New",
-        reason: "The first of two competing bookings",
-        paymentMethod: "Cash",
+        ...bookingBody(doctorId, date, free[0].startMinute),
+        patientId: "U101",
       },
     });
 
     const second = await call<Appointment>("POST", "/appointments", {
+      userId: "U102",
       body: {
-        patientId: PATIENT_ID,
-        doctorId,
-        date,
-        startMinute: free[1].startMinute,
-        type: "New",
-        reason: "The second of two competing bookings",
-        paymentMethod: "Cash",
+        ...bookingBody(doctorId, date, free[1].startMinute),
+        patientId: "U102",
       },
     });
 
-    const response = await mockTransport.request<Appointment>({
-      method: "PATCH",
-      path: `/appointments/${second.id}/reschedule`,
-      body: { date, startMinute: free[0].startMinute },
-      userId: PATIENT_ID,
-    });
+    // The owner of the second booking tries to move it onto the first
+    // booking's slot.
+    const response = await callRaw<Appointment>(
+      "PATCH",
+      `/appointments/${second.id}/reschedule`,
+      {
+        userId: "U102",
+        body: { date, startMinute: free[0].startMinute },
+      },
+    );
 
     expect(response.success).toBe(false);
     if (!response.success) {
@@ -322,7 +324,189 @@ describe("the appointment booking lifecycle", () => {
     const still = await call<Appointment>(
       "GET",
       `/appointments/${first.id}`,
+      { userId: "U101" },
     );
     expect(still.startMinute).toBe(free[0].startMinute);
+  });
+});
+
+describe("the realistic booking rules", () => {
+  beforeEach(() => {
+    resetDb();
+  });
+
+  it("refuses a booking beyond the lead time", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+
+    // The seed allows fourteen days, so the twentieth is outside the window.
+    const tooFar = addDaysIso(todayIso(), 20);
+    const free = await firstFreeSlot(doctorId, tooFar);
+
+    const response = await callRaw<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, tooFar, free.startMinute),
+    });
+
+    expect(response.success).toBe(false);
+    if (!response.success) {
+      expect(response.error.code).toBe("OUTSIDE_BOOKING_WINDOW");
+    }
+  });
+
+  it("refuses a booking on a day the doctor does not work", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+
+    // Find a weekday the doctor is not in the clinic on.
+    const db = readDb();
+    const doctor = db.doctors.find((item) => item.id === doctorId)!;
+    let closedDate = "";
+    for (let offset = 1; offset < 14; offset += 1) {
+      const iso = addDaysIso(todayIso(), offset);
+      if (!doctor.availableWeekdays.includes(weekdayOf(iso))) {
+        closedDate = iso;
+        break;
+      }
+    }
+    expect(closedDate).not.toBe("");
+
+    const free = await firstFreeSlot(doctorId, closedDate);
+
+    const response = await callRaw<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, closedDate, free.startMinute),
+    });
+
+    expect(response.success).toBe(false);
+    if (!response.success) {
+      expect(response.error.code).toBe("CLINIC_CLOSED");
+    }
+  });
+
+  it("refuses a second booking with the same doctor on the same day", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+    const date = firstBookableDate(doctorId);
+
+    const slots = await call<{ slots: Slot[] }>("GET", "/slots", {
+      query: { doctorId, date },
+    });
+    const free = slots.slots.filter((slot) => slot.available);
+
+    await call<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free[0].startMinute),
+    });
+
+    // A different slot, same doctor, same day — the patient must reschedule
+    // the booking they already have instead.
+    const response = await callRaw<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free[1].startMinute),
+    });
+
+    expect(response.success).toBe(false);
+    if (!response.success) {
+      expect(response.error.code).toBe("DUPLICATE_BOOKING");
+    }
+  });
+
+  it("refuses a cancellation without a reason", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+    const date = firstBookableDate(doctorId);
+    const free = await firstFreeSlot(doctorId, date);
+
+    const booked = await call<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free.startMinute),
+    });
+
+    const response = await callRaw<Appointment>(
+      "POST",
+      `/appointments/${booked.id}/cancel`,
+      { body: {} },
+    );
+
+    expect(response.success).toBe(false);
+    if (!response.success) {
+      expect(response.error.code).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("does not let a patient cancel somebody else's booking", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+    const date = firstBookableDate(doctorId);
+    const free = await firstFreeSlot(doctorId, date);
+
+    const booked = await call<Appointment>("POST", "/appointments", {
+      userId: "U101",
+      body: {
+        ...bookingBody(doctorId, date, free.startMinute),
+        patientId: "U101",
+      },
+    });
+
+    // U001 is not the owner of this booking.
+    const response = await callRaw<Appointment>(
+      "POST",
+      `/appointments/${booked.id}/cancel`,
+      { body: { reason: "Not my appointment" } },
+    );
+
+    expect(response.success).toBe(false);
+    if (!response.success) {
+      expect(response.error.code).toBe("NOT_ALLOWED");
+    }
+  });
+
+  it("does not let a patient book for somebody else", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+    const date = firstBookableDate(doctorId);
+    const free = await firstFreeSlot(doctorId, date);
+
+    const response = await callRaw<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free.startMinute, {
+        patientId: "U101",
+      }),
+    });
+
+    expect(response.success).toBe(false);
+    if (!response.success) {
+      expect(response.error.code).toBe("NOT_ALLOWED");
+    }
+  });
+
+  it("sends a notification when a booking is made", async () => {
+    const doctors = await call<{ id: string }[]>("GET", "/doctors", {
+      query: { active: "true" },
+    });
+    const doctorId = doctors[0].id;
+    const date = firstBookableDate(doctorId);
+    const free = await firstFreeSlot(doctorId, date);
+
+    const booked = await call<Appointment>("POST", "/appointments", {
+      body: bookingBody(doctorId, date, free.startMinute),
+    });
+
+    const notifications = await call<
+      { id: string; title: string; read: boolean }[]
+    >("GET", "/notifications");
+
+    const match = notifications.find((item) =>
+      item.title.includes(String(booked.tokenNumber)),
+    );
+    expect(match).toBeDefined();
+    expect(match?.read).toBe(false);
   });
 });

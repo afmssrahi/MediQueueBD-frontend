@@ -9,12 +9,20 @@ board, the medical record, and the AI summary screen.
 docker compose up --build
 ```
 
-Then open <http://localhost:3000>. Full instructions, configuration and
-troubleshooting are in **[DOCKER.md](./DOCKER.md)**.
+Then open <http://localhost:3000>. The full walkthrough — prerequisites, the
+demo accounts, the configuration and the troubleshooting — is in
+**[RUN.md](./RUN.md)**; the Docker image itself is documented in
+**[DOCKER.md](./DOCKER.md)**.
 
-This starts the frontend **and** the AI summary service, so the AI summary
-screen works out of the box. For the whole stack — including the optional
-MySQL service — use the compose file in the parent folder.
+This starts the frontend on its own. The AI summary service is behind the
+`ai` profile, so add it with:
+
+```bash
+docker compose --profile ai up --build
+```
+
+For the whole stack — including the optional MySQL service — use the compose
+file in the parent folder.
 
 ## Getting started (development)
 
@@ -63,3 +71,11 @@ npm run verify      # all four
 The layering rule is simple: `src/domain/**` and `src/demo/**` never import
 React and never touch the DOM, so they lift unchanged into a real backend
 later.
+
+## The documentation
+
+| Document | What it covers |
+|---|---|
+| [RUN.md](./RUN.md) | Running the app with Docker — prerequisites, the demo accounts, the configuration, the troubleshooting. |
+| [DOCKER.md](./DOCKER.md) | The Docker image in detail — the build stages, the configuration, the troubleshooting. |
+| [docs/appointments/](./docs/appointments) | The appointment feature — the rules, the screens, the API and the tests. |

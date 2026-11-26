@@ -4,7 +4,7 @@ Everything the app needs is baked into the image, so a fresh clone only requires
 **Docker** — no Node.js install on the host.
 
 - `Dockerfile` — multi-stage build (deps → build → runtime)
-- `docker-compose.yml` — one-command run (the frontend + the AI summary service)
+- `docker-compose.yml` — one-command run (the frontend, with the AI summary service behind the optional `ai` profile)
 - `src/proxy.ts` — proxies `/ai-service/**` to the AI summary service
 - `.dockerignore` — keeps the build context small
 - `.env.example` — optional configuration
@@ -40,9 +40,17 @@ docker compose up --build
 
 Then open <http://localhost:3000>.
 
-This starts **two** containers: the frontend on port 3000 and the AI summary
-service on port 4100. The frontend proxies `/ai-service/**` to the service, so
-the AI summary screen works out of the box.
+This starts the **frontend** on port 3000. The frontend proxies
+`/ai-service/**` to the AI summary service, so add the service with the `ai`
+profile to make the AI summary screen work:
+
+```bash
+docker compose --profile ai up --build
+```
+
+That starts **two** containers: the frontend on port 3000 and the AI summary
+service on port 4100. The AI service is optional — without it the app still
+runs, and the `/patient/summary` screen falls back to the bundled demo data.
 
 The first build takes a few minutes (it installs the full dependency tree and
 runs `next build`). Later builds reuse the Docker layer cache and finish in
@@ -92,6 +100,7 @@ docker stop mediqueue-frontend
 | --- | --- |
 | Start (rebuild if needed) | `docker compose up --build` |
 | Start in the background | `docker compose up -d --build` |
+| Start with the AI summary service | `docker compose --profile ai up -d --build` |
 | View logs | `docker compose logs -f` |
 | Check health | `docker compose ps` |
 | Stop | `docker compose down` |
@@ -165,14 +174,13 @@ The app runs on demo data by default. Confirm `NEXT_PUBLIC_API_MODE=mock` and
 rebuild.
 
 **The AI summary screen says the service is unreachable**
-The AI summary service is a separate container. Check it is running:
+The AI summary service is a separate container, behind the `ai` profile.
+Start it with:
 
 ```bash
-docker compose ps
+docker compose --profile ai up -d ai-summary
 curl http://localhost:4100/api/health
 ```
-
-If it is not up: `docker compose up -d ai-summary`.
 
 **Changes to the code are not showing**
 Rebuild the image — the container uses the built output, not your local files:

@@ -13,6 +13,45 @@ import {
   buildSummaries,
 } from "./clinical";
 import type { DemoDatabase } from "../types";
+import type { Doctor } from "@/types";
+
+/**
+ * The midday break for a doctor.
+ *
+ * A real clinic does not run the chair straight through — there is a break
+ * for tea and prayer, and no appointment is offered while it is on. The
+ * break is derived from the session window so every doctor gets one that
+ * falls inside their own hours.
+ */
+export function lunchBreakFor(
+  sessionStart: number,
+  sessionEnd: number,
+): { start: number; end: number } | null {
+  const candidates = [
+    { start: 12 * 60 + 30, end: 13 * 60 },
+    { start: 13 * 60, end: 13 * 60 + 30 },
+    { start: 19 * 60, end: 19 * 60 + 30 },
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate.start >= sessionStart && candidate.end <= sessionEnd) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/** Give every doctor the break that fits their session. */
+function withBreak(doctor: Doctor): Doctor {
+  const breakWindow = lunchBreakFor(doctor.sessionStart, doctor.sessionEnd);
+
+  return {
+    ...doctor,
+    lunchBreakStart: breakWindow?.start ?? null,
+    lunchBreakEnd: breakWindow?.end ?? null,
+  };
+}
 
 /**
  * Build a fresh database from the seed fixtures.
@@ -30,7 +69,7 @@ export function createSeedDatabase(): DemoDatabase {
     hospitals: HOSPITALS.map((hospital) => ({ ...hospital })),
     departments: DEPARTMENTS.map((department) => ({ ...department })),
     doctors: DOCTORS.map((doctor) => ({
-      ...doctor,
+      ...withBreak(doctor),
       consultationHistory: [...doctor.consultationHistory],
       availableWeekdays: [...doctor.availableWeekdays],
     })),

@@ -3,10 +3,15 @@
 # The image is built from ./Dockerfile. Everything the app needs is baked in,
 # so a fresh clone only needs Docker — no Node.js install on the host.
 #
-# This file runs the **frontend together with the AI summary service**. The AI
-# service is a separate backend, so it is started here as well — without it the
-# app still runs, but the /patient/summary screen falls back to the bundled
-# demo data.
+# The AI summary service is a separate backend in the sibling folder
+# `../ai-summary-prototype`. It sits behind the `ai` profile, so this file
+# works even when someone has cloned **only** this folder:
+#
+#   docker compose up --build                 # just the frontend
+#   docker compose --profile ai up --build   # the frontend + the AI service
+#
+# Without the AI service the app still runs — the /patient/summary screen
+# falls back to the bundled demo data.
 #
 # For the whole stack (frontend + AI summary service + optional MySQL), use the
 # compose file in the parent folder instead: `docker compose up --build` from
@@ -23,7 +28,6 @@ services:
         NEXT_PUBLIC_API_MODE: ${NEXT_PUBLIC_API_MODE:-mock}
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api}
     image: mediqueue-frontend:latest
-    container_name: mediqueue-frontend
     ports:
       # host:container — edit the left side to use a different host port
       - "${PORT:-3000}:3000"
@@ -37,6 +41,7 @@ services:
     depends_on:
       ai-summary:
         condition: service_healthy
+        required: false
     restart: unless-stopped
     healthcheck:
       test:
@@ -49,15 +54,15 @@ services:
       retries: 3
       start_period: 20s
 
-  # ── the AI summary service ─────────────────────────────────────────────────
+  # ── the AI summary service (optional) ─────────────────────────────────────
   # It turns an uploaded prescription or medical record into a summary, a
   # patient history and a list of real literature references.
   ai-summary:
+    profiles: ["ai"]
     build:
       context: ../ai-summary-prototype
       dockerfile: Dockerfile
     image: mediqueue-ai-summary:latest
-    container_name: mediqueue-ai-summary
     ports:
       - "${AI_PORT:-4100}:4100"
     environment:
